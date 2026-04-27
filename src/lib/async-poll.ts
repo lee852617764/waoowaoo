@@ -293,6 +293,24 @@ function decodeModelKey(token: string): string {
     }
 }
 
+function firstNonEmptyStatus(statuses: unknown[]): string {
+    for (const item of statuses) {
+        if (typeof item === 'string' && item.trim()) {
+            return item.trim().toLowerCase()
+        }
+    }
+    return ''
+}
+
+function readFirstOutputUrl(value: unknown): string {
+    if (!Array.isArray(value) || value.length === 0) return ''
+    const first = value[0]
+    if (typeof first === 'string') return first.trim()
+    if (!first || typeof first !== 'object') return ''
+    const url = (first as { url?: unknown }).url
+    return typeof url === 'string' ? url.trim() : ''
+}
+
 function resolveOCompatModelKey(providerId: string, token: string): string {
     const decoded = decodeModelKey(token).trim()
     if (!decoded) {
@@ -355,18 +373,19 @@ async function pollOCompatTask(
         }
     }
     const payload = normalizeResponseJson(rawText)
-    const statusRaw = readJsonPath(payload, template.response.statusPath)
-    const status = typeof statusRaw === 'string' ? statusRaw.trim().toLowerCase() : ''
-    if (!status) {
-        return {
-            status: 'failed',
-            error: 'OCOMPAT status path resolve failed',
-        }
-    }
+    const status = firstNonEmptyStatus([
+        readJsonPath(payload, template.response.statusPath),
+        readJsonPath(payload, '$.status'),
+        readJsonPath(payload, '$.state'),
+        readJsonPath(payload, '$.task_status'),
+    ])
     const doneStates = (template.polling?.doneStates || []).map((item) => item.toLowerCase())
     const failStates = (template.polling?.failStates || []).map((item) => item.toLowerCase())
-    if (doneStates.includes(status)) {
-        const outputUrl = readJsonPath(payload, template.response.outputUrlPath)
+    const outputUrl = readJsonPath(payload, template.response.outputUrlPath)
+    const rawOutputUrls = readJsonPath(payload, template.response.outputUrlsPath)
+    const outputFromArray = readFirstOutputUrl(rawOutputUrls)
+
+    if (doneStates.includes(status) || (!status && (typeof outputUrl === 'string' && outputUrl.trim() || outputFromArray))) {
         if (typeof outputUrl === 'string' && outputUrl.trim()) {
             return {
                 status: 'completed',
@@ -374,6 +393,15 @@ async function pollOCompatTask(
                 ...(type === 'VIDEO'
                     ? { videoUrl: outputUrl.trim() }
                     : { imageUrl: outputUrl.trim() }),
+            }
+        }
+        if (outputFromArray) {
+            return {
+                status: 'completed',
+                resultUrl: outputFromArray,
+                ...(type === 'VIDEO'
+                    ? { videoUrl: outputFromArray }
+                    : { imageUrl: outputFromArray }),
             }
         }
         if (template.content) {
@@ -405,6 +433,9 @@ async function pollOCompatTask(
             status: 'failed',
             error: typeof errorRaw === 'string' && errorRaw.trim() ? errorRaw.trim() : `OCOMPAT task failed: ${status}`,
         }
+    }
+    if (!status) {
+        return { status: 'pending' }
     }
     return { status: 'pending' }
 }

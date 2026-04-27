@@ -1160,7 +1160,7 @@ describe('api specific - user api-config PUT provider uniqueness', () => {
     expect(savedModel?.compatMediaTemplate).toMatchObject({
       version: 1,
       mediaType: 'image',
-      mode: 'sync',
+      mode: 'async',
       create: {
         path: '/images/generations',
       },

@@ -980,7 +980,7 @@ function getDefaultMediaTemplate(type: 'image' | 'video'): OpenAICompatMediaTemp
     return {
       version: 1,
       mediaType: 'image',
-      mode: 'sync',
+      mode: 'async',
       create: {
         method: 'POST',
         path: '/images/generations',
@@ -990,10 +990,22 @@ function getDefaultMediaTemplate(type: 'image' | 'video'): OpenAICompatMediaTemp
           prompt: '{{prompt}}',
         },
       },
+      status: {
+        method: 'GET',
+        path: '/images/generations/{{task_id}}',
+      },
       response: {
+        taskIdPath: '$.id',
+        statusPath: '$.status',
         outputUrlPath: '$.data[0].url',
         outputUrlsPath: '$.data',
         errorPath: '$.error.message',
+      },
+      polling: {
+        intervalMs: 3000,
+        timeoutMs: 300000,
+        doneStates: ['completed', 'succeeded'],
+        failStates: ['failed', 'error', 'cancelled', 'canceled'],
       },
     }
   }
@@ -1124,6 +1136,22 @@ function resolveStoredMediaTemplates(
 
     const existing = existingByModelKey.get(model.modelKey)
     if (existing?.compatMediaTemplate) {
+      const t = existing.compatMediaTemplate
+      const isLegacySyncDefault = (
+        expectedMediaType === 'image'
+        && t.mode === 'sync'
+        && !t.status
+        && t.create?.path === '/images/generations'
+        && t.response?.outputUrlPath === '$.data[0].url'
+      )
+      if (isLegacySyncDefault) {
+        return {
+          ...model,
+          compatMediaTemplate: getDefaultMediaTemplate(expectedMediaType),
+          compatMediaTemplateCheckedAt: checkedAtFallback,
+          compatMediaTemplateSource: 'manual',
+        }
+      }
       return {
         ...model,
         compatMediaTemplate: existing.compatMediaTemplate,

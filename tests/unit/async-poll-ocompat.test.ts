@@ -163,4 +163,50 @@ describe('async poll ocompat', () => {
       videoUrl: 'https://cdn.test/video-fast.mp4',
     })
   })
+
+  it('falls back to top-level status when template statusPath is invalid', async () => {
+    getUserModelsMock.mockResolvedValueOnce([
+      {
+        modelKey: 'openai-compatible:oa-1::image-fast',
+        modelId: 'image-fast',
+        name: 'Image Fast',
+        type: 'image',
+        provider: 'openai-compatible:oa-1',
+        price: 0,
+        compatMediaTemplate: {
+          version: 1,
+          mediaType: 'image',
+          mode: 'async',
+          create: { method: 'POST', path: '/images/generations' },
+          status: { method: 'GET', path: '/images/generations/{{task_id}}' },
+          response: {
+            statusPath: '$.meta.status',
+            outputUrlsPath: '$.data',
+          },
+          polling: {
+            intervalMs: 3000,
+            timeoutMs: 180000,
+            doneStates: ['completed'],
+            failStates: ['failed'],
+          },
+        },
+      },
+    ])
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      status: 'completed',
+      data: [{ url: 'https://cdn.test/image-fast.png' }],
+    }), { status: 200 }))
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+
+    const result = await pollAsyncTask(
+      `OCOMPAT:IMAGE:${encode('openai-compatible:oa-1')}:${encode('openai-compatible:oa-1::image-fast')}:task_4`,
+      'user-1',
+    )
+
+    expect(result).toEqual({
+      status: 'completed',
+      resultUrl: 'https://cdn.test/image-fast.png',
+      imageUrl: 'https://cdn.test/image-fast.png',
+    })
+  })
 })

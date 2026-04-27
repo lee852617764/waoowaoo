@@ -118,6 +118,50 @@ function assertModelKey(value: string, field: string): { provider: string; model
   return parsed
 }
 
+function isLegacyOpenAICompatImageSyncTemplate(template: OpenAICompatMediaTemplate): boolean {
+  return (
+    template.mediaType === 'image'
+    && template.mode === 'sync'
+    && !template.status
+    && template.create?.path === '/images/generations'
+    && template.response?.outputUrlPath === '$.data[0].url'
+  )
+}
+
+function buildDefaultOpenAICompatImageAsyncTemplate(): OpenAICompatMediaTemplate {
+  return {
+    version: 1,
+    mediaType: 'image',
+    mode: 'async',
+    create: {
+      method: 'POST',
+      path: '/images/generations',
+      contentType: 'application/json',
+      bodyTemplate: {
+        model: '{{model}}',
+        prompt: '{{prompt}}',
+      },
+    },
+    status: {
+      method: 'GET',
+      path: '/images/generations/{{task_id}}',
+    },
+    response: {
+      taskIdPath: '$.id',
+      statusPath: '$.status',
+      outputUrlPath: '$.data[0].url',
+      outputUrlsPath: '$.data',
+      errorPath: '$.error.message',
+    },
+    polling: {
+      intervalMs: 3000,
+      timeoutMs: 300000,
+      doneStates: ['completed', 'succeeded'],
+      failStates: ['failed', 'error', 'cancelled', 'canceled'],
+    },
+  }
+}
+
 function parseCustomProviders(rawProviders: string | null | undefined): CustomProvider[] {
   if (!rawProviders) return []
 
@@ -234,6 +278,10 @@ function normalizeStoredModel(raw: unknown, index: number): CustomModel {
       throw new Error(`MODEL_COMPAT_MEDIA_TEMPLATE_INVALID: models[${index}].compatMediaTemplate`)
     }
     compatMediaTemplate = validated.template
+    const isOpenAICompatImageModel = raw.type === 'image' && getProviderKey(provider).toLowerCase() === 'openai-compatible'
+    if (isOpenAICompatImageModel && isLegacyOpenAICompatImageSyncTemplate(compatMediaTemplate)) {
+      compatMediaTemplate = buildDefaultOpenAICompatImageAsyncTemplate()
+    }
   }
   const compatMediaTemplateCheckedAt = readTrimmedString(raw.compatMediaTemplateCheckedAt) || undefined
   const compatMediaTemplateSourceRaw = readTrimmedString(raw.compatMediaTemplateSource)

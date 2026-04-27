@@ -19,6 +19,33 @@ describe('model-gateway openai-compat responses executor', () => {
     vi.clearAllMocks()
   })
 
+  it('normalizes responses endpoint when provider baseUrl has trailing slash', async () => {
+    resolveOpenAICompatClientConfigMock.mockResolvedValueOnce({
+      providerId: 'openai-compatible:node-1',
+      baseUrl: 'https://compat.example.com/v1///',
+      apiKey: 'sk-test',
+    })
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      output_text: 'ok',
+      usage: {
+        input_tokens: 1,
+        output_tokens: 1,
+      },
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await runOpenAICompatResponsesCompletion({
+      userId: 'user-1',
+      providerId: 'openai-compatible:node-1',
+      modelId: 'gpt-4.1-mini',
+      messages: [{ role: 'user', content: 'hello' }],
+      temperature: 0.2,
+    })
+
+    const firstCall = fetchMock.mock.calls[0] as unknown[] | undefined
+    expect(String(firstCall?.[0])).toBe('https://compat.example.com/v1/responses')
+  })
+
   it('converts responses payload to normalized chat completion', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       output: [
