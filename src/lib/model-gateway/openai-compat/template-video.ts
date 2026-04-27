@@ -51,6 +51,7 @@ export async function generateVideoViaOpenAICompatTemplate(
   }
 
   const config = await resolveOpenAICompatClientConfig(request.userId, request.providerId)
+  const lastFrameImageUrl = typeof request.options?.lastFrameImageUrl === 'string' ? request.options.lastFrameImageUrl : ''
   const variables = buildTemplateVariables({
     model: request.modelId || '',
     prompt: request.prompt,
@@ -60,6 +61,7 @@ export async function generateVideoViaOpenAICompatTemplate(
     resolution: typeof request.options?.resolution === 'string' ? request.options.resolution : undefined,
     size: typeof request.options?.size === 'string' ? request.options.size : undefined,
     duration: typeof request.options?.duration === 'number' ? request.options.duration : undefined,
+    image2: lastFrameImageUrl || undefined,
     extra: request.options,
   })
 

@@ -1,7 +1,7 @@
 services:
   # ==================== MySQL ====================
   mysql:
-    image: mysql:8.0
+    image: docker.1ms.run/library/mysql:8.0
     container_name: waoowaoo-mysql
     restart: unless-stopped
     environment:
@@ -24,7 +24,7 @@ services:
 
   # ==================== Redis ====================
   redis:
-    image: redis:7-alpine
+    image: docker.1ms.run/library/redis:7-alpine
     container_name: waoowaoo-redis
     restart: unless-stopped
     ports:
@@ -41,7 +41,7 @@ services:
 
   # ==================== MinIO ====================
   minio:
-    image: minio/minio:RELEASE.2025-02-28T09-55-16Z
+    image: docker.1ms.run/minio/minio:RELEASE.2025-02-28T09-55-16Z
     container_name: waoowaoo-minio
     restart: unless-stopped
     environment:
@@ -62,7 +62,8 @@ services:
 
   # ==================== App (Next.js + Workers) ====================
   app:
-    image: ghcr.io/saturndec/waoowaoo:latest
+    build: .
+    image: waoowaoo:local
     container_name: waoowaoo-app
     restart: unless-stopped
     environment:

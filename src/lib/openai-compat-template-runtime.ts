@@ -432,6 +432,7 @@ export function buildTemplateVariables(input: {
   resolution?: string
   size?: string
   taskId?: string
+  image2?: string
   extra?: Record<string, unknown>
 }): TemplateVariableMap {
   const variables: TemplateVariableMap = {
@@ -444,6 +445,7 @@ export function buildTemplateVariables(input: {
     resolution: input.resolution || '',
     size: input.size || '',
     task_id: input.taskId || '',
+    image2: input.image2 || '',
   }
   appendTemplateOptionVariables(variables, input.extra)
   return variables
