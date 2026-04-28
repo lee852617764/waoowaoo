@@ -72,7 +72,7 @@ describe('async poll ocompat', () => {
     })
   })
 
-  it('uses content endpoint when output url is missing', async () => {
+  it('uses common result_url fields before content endpoint fallback', async () => {
     getUserModelsMock.mockResolvedValueOnce([
       {
         modelKey: 'openai-compatible:oa-1::veo3.1',
@@ -102,6 +102,7 @@ describe('async poll ocompat', () => {
     ])
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       status: 'succeeded',
+      result_url: 'https://api.runnode.cn/v1/files/video-result.mp4',
     }), { status: 200 }))
     globalThis.fetch = fetchMock as unknown as typeof fetch
 
@@ -110,10 +111,10 @@ describe('async poll ocompat', () => {
       'user-1',
     )
 
-    expect(result.status).toBe('completed')
-    expect(result.videoUrl).toBe('https://compat.example.com/v1/v2/videos/generations/task_2/content')
-    expect(result.downloadHeaders).toEqual({
-      Authorization: 'Bearer sk-test',
+    expect(result).toEqual({
+      status: 'completed',
+      resultUrl: 'https://api.runnode.cn/v1/files/video-result.mp4',
+      videoUrl: 'https://api.runnode.cn/v1/files/video-result.mp4',
     })
   })
 

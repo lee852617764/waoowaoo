@@ -298,17 +298,46 @@ function firstNonEmptyStatus(statuses: unknown[]): string {
         if (typeof item === 'string' && item.trim()) {
             return item.trim().toLowerCase()
         }
+        if (typeof item === 'number' && Number.isFinite(item)) {
+            return String(item)
+        }
+    }
+    return ''
+}
+
+function firstNonEmptyText(values: unknown[]): string {
+    for (const item of values) {
+        if (typeof item === 'string' && item.trim()) {
+            return item.trim()
+        }
     }
     return ''
 }
 
 function readFirstOutputUrl(value: unknown): string {
-    if (!Array.isArray(value) || value.length === 0) return ''
-    const first = value[0]
-    if (typeof first === 'string') return first.trim()
-    if (!first || typeof first !== 'object') return ''
-    const url = (first as { url?: unknown }).url
-    return typeof url === 'string' ? url.trim() : ''
+    const tryReadFirst = (input: unknown): string => {
+        if (!Array.isArray(input) || input.length === 0) return ''
+        const first = input[0]
+        if (typeof first === 'string') return first.trim()
+        if (!first || typeof first !== 'object') return ''
+        const firstObj = first as { url?: unknown; fileUrl?: unknown }
+        if (typeof firstObj.url === 'string' && firstObj.url.trim()) return firstObj.url.trim()
+        return typeof firstObj.fileUrl === 'string' ? firstObj.fileUrl.trim() : ''
+    }
+
+    const direct = tryReadFirst(value)
+    if (direct) return direct
+
+    if (typeof value === 'string' && value.trim()) {
+        try {
+            const parsed = JSON.parse(value)
+            return tryReadFirst(parsed)
+        } catch {
+            return ''
+        }
+    }
+
+    return ''
 }
 
 function resolveOCompatModelKey(providerId: string, token: string): string {
@@ -384,6 +413,14 @@ async function pollOCompatTask(
     const outputUrl = readJsonPath(payload, template.response.outputUrlPath)
     const rawOutputUrls = readJsonPath(payload, template.response.outputUrlsPath)
     const outputFromArray = readFirstOutputUrl(rawOutputUrls)
+    const fallbackOutputUrl = firstNonEmptyText([
+        readJsonPath(payload, '$.result_url'),
+        readJsonPath(payload, '$.video_url'),
+        readJsonPath(payload, '$.data.result_url'),
+        readJsonPath(payload, '$.data.video_url'),
+        readJsonPath(payload, '$.output.result_url'),
+        readJsonPath(payload, '$.output.video_url'),
+    ])
 
     if (doneStates.includes(status) || (!status && (typeof outputUrl === 'string' && outputUrl.trim() || outputFromArray))) {
         if (typeof outputUrl === 'string' && outputUrl.trim()) {
@@ -402,6 +439,15 @@ async function pollOCompatTask(
                 ...(type === 'VIDEO'
                     ? { videoUrl: outputFromArray }
                     : { imageUrl: outputFromArray }),
+            }
+        }
+        if (fallbackOutputUrl) {
+            return {
+                status: 'completed',
+                resultUrl: fallbackOutputUrl,
+                ...(type === 'VIDEO'
+                    ? { videoUrl: fallbackOutputUrl }
+                    : { imageUrl: fallbackOutputUrl }),
             }
         }
         if (template.content) {
@@ -488,27 +534,19 @@ async function pollOpenAIVideoTask(
         return { status: 'pending' }
     }
 
-    // Completed: prefer video_url from response body (some gateways provide it directly)
+    // Completed: use direct media URLs returned by gateway/provider.
+    // Prefer explicit result_url, then video_url.
+    const resultUrl = typeof task.result_url === 'string' ? task.result_url.trim() : ''
     const videoUrl = typeof task.video_url === 'string' ? task.video_url.trim() : ''
-    if (videoUrl) {
+    const directUrl = resultUrl || videoUrl
+    if (directUrl) {
         return {
             status: 'completed',
-            videoUrl,
-            resultUrl: videoUrl,
+            videoUrl: directUrl,
+            resultUrl: directUrl,
         }
     }
-
-    // Fallback: OpenAI standard /videos/:id/content endpoint
-    const taskId = typeof task.id === 'string' ? task.id : videoId
-    const contentUrl = `${baseUrl}/videos/${encodeURIComponent(taskId)}/content`
-    return {
-        status: 'completed',
-        videoUrl: contentUrl,
-        resultUrl: contentUrl,
-        downloadHeaders: {
-            Authorization: `Bearer ${config.apiKey}`,
-        },
-    }
+    return { status: 'failed', error: 'OpenAI video task completed but no result_url/video_url returned' }
 }
 
 /**

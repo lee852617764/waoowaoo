@@ -1203,14 +1203,13 @@ describe('api specific - user api-config PUT provider uniqueness', () => {
       mode: 'async',
       create: {
         path: '/videos',
-        contentType: 'multipart/form-data',
-        multipartFileFields: ['input_reference'],
+        contentType: 'application/json',
         bodyTemplate: {
           model: '{{model}}',
           prompt: '{{prompt}}',
           seconds: '{{duration}}',
           size: '{{size}}',
-          input_reference: '{{image}}',
+          image: '{{image}}',
         },
       },
       status: {
@@ -1224,6 +1223,8 @@ describe('api specific - user api-config PUT provider uniqueness', () => {
         statusPath: '$.status',
       },
     })
+    const videoCreate = (savedModel?.compatMediaTemplate as { create?: Record<string, unknown> } | undefined)?.create
+    expect(videoCreate).not.toHaveProperty('multipartFileFields')
     expect(savedModel?.compatMediaTemplateSource).toBe('manual')
     expect(typeof savedModel?.compatMediaTemplateCheckedAt).toBe('string')
   })
@@ -1294,5 +1295,75 @@ describe('api specific - user api-config PUT provider uniqueness', () => {
       },
     })
     expect(savedModel?.compatMediaTemplateSource).toBe('ai')
+  })
+
+  it('normalizes runnode ltx video template contentType to application/json', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    const route = await import('@/app/api/user/api-config/route')
+
+    const req = buildMockRequest({
+      path: '/api/user/api-config',
+      method: 'PUT',
+      body: {
+        providers: [
+          { id: 'openai-compatible:oa-1', name: 'OpenAI Compat', baseUrl: 'https://compat.test/v1', apiKey: 'oa-key' },
+        ],
+        models: [
+          {
+            modelId: 'runnode/ltx-2.3-22b-dev-i2v',
+            modelKey: 'openai-compatible:oa-1::runnode/ltx-2.3-22b-dev-i2v',
+            name: 'RunNode LTX 2.3 i2v',
+            type: 'video',
+            provider: 'openai-compatible:oa-1',
+            compatMediaTemplate: {
+              version: 1,
+              mediaType: 'video',
+              mode: 'async',
+              create: {
+                method: 'POST',
+                path: '/videos',
+                contentType: 'multipart/form-data',
+                multipartFileFields: ['input_reference'],
+                bodyTemplate: {
+                  model: '{{model}}',
+                  prompt: '{{prompt}}',
+                  input_reference: '{{image}}',
+                },
+              },
+              status: {
+                method: 'GET',
+                path: '/videos/{{task_id}}',
+              },
+              response: {
+                taskIdPath: '$.id',
+                statusPath: '$.status',
+              },
+              polling: {
+                intervalMs: 3000,
+                timeoutMs: 180000,
+                doneStates: ['completed'],
+                failStates: ['failed'],
+              },
+            },
+          },
+        ],
+      },
+    })
+
+    const res = await route.PUT(req, routeContext)
+    expect(res.status).toBe(200)
+    const savedModels = readSavedModelsFromUpsert()
+    const savedModel = savedModels.find((item) => item.modelKey === 'openai-compatible:oa-1::runnode/ltx-2.3-22b-dev-i2v')
+    expect(savedModel?.compatMediaTemplate).toMatchObject({
+      mediaType: 'video',
+      mode: 'async',
+      create: {
+        path: '/videos',
+        contentType: 'application/json',
+      },
+    })
+    const createConfig = (savedModel?.compatMediaTemplate as { create?: Record<string, unknown> } | undefined)?.create
+    expect(createConfig).not.toHaveProperty('multipartFileFields')
   })
 })

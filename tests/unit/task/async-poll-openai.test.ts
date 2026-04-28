@@ -50,22 +50,37 @@ describe('async poll OPENAI video status mapping', () => {
     expect(progress).toEqual({ status: 'pending' })
   })
 
-  it('maps completed to downloadable url and auth headers', async () => {
+  it('maps completed to direct result_url', async () => {
     fetchSpy.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
         id: 'vid_done',
         status: 'completed',
+        result_url: 'https://api.runnode.cn/v1/files/video.mp4',
       }),
     })
 
     const result = await pollAsyncTask(`OPENAI:VIDEO:${PROVIDER_TOKEN}:vid_done`, 'user-1')
 
     expect(result.status).toBe('completed')
-    expect(result.resultUrl).toBe('https://oa.test/v1/videos/vid_done/content')
-    expect(result.videoUrl).toBe('https://oa.test/v1/videos/vid_done/content')
-    expect(result.downloadHeaders).toEqual({
-      Authorization: 'Bearer oa-key',
+    expect(result.resultUrl).toBe('https://api.runnode.cn/v1/files/video.mp4')
+    expect(result.videoUrl).toBe('https://api.runnode.cn/v1/files/video.mp4')
+    expect(result.downloadHeaders).toBeUndefined()
+  })
+
+  it('maps completed to failed when no direct url exists', async () => {
+    fetchSpy.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        id: 'vid_done_without_url',
+        status: 'completed',
+      }),
+    })
+
+    const result = await pollAsyncTask(`OPENAI:VIDEO:${PROVIDER_TOKEN}:vid_done_without_url`, 'user-1')
+    expect(result).toEqual({
+      status: 'failed',
+      error: 'OpenAI video task completed but no result_url/video_url returned',
     })
   })
 

@@ -17,6 +17,7 @@ import {
 import type {
   OpenAICompatMediaTemplate,
   OpenAICompatMediaTemplateSource,
+  TemplateBodyValue,
 } from './openai-compat-media-template'
 import { validateOpenAICompatMediaTemplate } from './user-api/model-template/validator'
 
@@ -34,6 +35,8 @@ export interface CustomModel {
   // Non-authoritative display field; billing uses unified server pricing catalog.
   price: number
 }
+
+const RUNNODE_VIDEO_MODEL_ID_PREFIX = 'runnode/'
 
 export type ModelMediaType = 'llm' | 'image' | 'video' | 'audio' | 'lipsync'
 
@@ -162,6 +165,82 @@ function buildDefaultOpenAICompatImageAsyncTemplate(): OpenAICompatMediaTemplate
   }
 }
 
+function shouldNormalizeRunnodeVideoTemplate(
+  model: Pick<CustomModel, 'type' | 'modelId'>,
+  template: OpenAICompatMediaTemplate,
+): boolean {
+  if (
+    model.type !== 'video'
+    || !model.modelId.startsWith(RUNNODE_VIDEO_MODEL_ID_PREFIX)
+    || template.mediaType !== 'video'
+    || template.mode !== 'async'
+  ) {
+    return false
+  }
+
+  const body = template.create.bodyTemplate
+  const bodyRecord = body && typeof body === 'object' && !Array.isArray(body)
+    ? (body as Record<string, TemplateBodyValue>)
+    : null
+
+  const hasImage = !!bodyRecord && Object.prototype.hasOwnProperty.call(bodyRecord, 'image')
+  const hasInputReference = !!bodyRecord && Object.prototype.hasOwnProperty.call(bodyRecord, 'input_reference')
+  const hasNumericDoneState = !!template.polling?.doneStates?.some((item) => item === '2')
+  const hasNumericFailState = !!template.polling?.failStates?.some((item) => item === '4')
+  const hasExpectedStatusPath = template.response?.statusPath === '$.data.status'
+
+  return (
+    template.create.contentType === 'multipart/form-data'
+    || (!hasImage && hasInputReference)
+    || !hasExpectedStatusPath
+    || !hasNumericDoneState
+    || !hasNumericFailState
+  )
+}
+
+function normalizeRunnodeVideoTemplate(
+  model: Pick<CustomModel, 'type' | 'modelId'>,
+  template: OpenAICompatMediaTemplate,
+): OpenAICompatMediaTemplate {
+  if (!shouldNormalizeRunnodeVideoTemplate(model, template)) return template
+
+  const body = template.create.bodyTemplate
+  const bodyRecord = body && typeof body === 'object' && !Array.isArray(body)
+    ? (body as Record<string, TemplateBodyValue>)
+    : {}
+  const { input_reference: legacyInputReference, ...restBody } = bodyRecord
+  const doneStates = Array.from(new Set([...(template.polling?.doneStates || []), '2']))
+  const failStates = Array.from(new Set([...(template.polling?.failStates || []), '4']))
+  const intervalMs = template.polling?.intervalMs ?? 3000
+  const timeoutMs = template.polling?.timeoutMs ?? 300000
+
+  return {
+    ...template,
+    create: {
+      ...template.create,
+      contentType: 'application/json',
+      multipartFileFields: undefined,
+      bodyTemplate: {
+        ...restBody,
+        image: restBody.image ?? legacyInputReference ?? '{{image}}',
+      },
+    },
+    response: {
+      ...template.response,
+      statusPath: '$.data.status',
+      outputUrlPath: undefined,
+      outputUrlsPath: '$.data.result_data',
+      errorPath: template.response?.errorPath || '$.data.error_message',
+    },
+    polling: {
+      intervalMs,
+      timeoutMs,
+      doneStates,
+      failStates,
+    },
+  }
+}
+
 function parseCustomProviders(rawProviders: string | null | undefined): CustomProvider[] {
   if (!rawProviders) return []
 
@@ -272,6 +351,7 @@ function normalizeStoredModel(raw: unknown, index: number): CustomModel {
 
   const compatMediaTemplateRaw = raw.compatMediaTemplate
   let compatMediaTemplate: OpenAICompatMediaTemplate | undefined
+
   if (compatMediaTemplateRaw !== undefined && compatMediaTemplateRaw !== null) {
     const validated = validateOpenAICompatMediaTemplate(compatMediaTemplateRaw)
     if (!validated.ok || !validated.template) {
@@ -282,6 +362,13 @@ function normalizeStoredModel(raw: unknown, index: number): CustomModel {
     if (isOpenAICompatImageModel && isLegacyOpenAICompatImageSyncTemplate(compatMediaTemplate)) {
       compatMediaTemplate = buildDefaultOpenAICompatImageAsyncTemplate()
     }
+    compatMediaTemplate = normalizeRunnodeVideoTemplate(
+      {
+        type: raw.type,
+        modelId,
+      },
+      compatMediaTemplate,
+    )
   }
   const compatMediaTemplateCheckedAt = readTrimmedString(raw.compatMediaTemplateCheckedAt) || undefined
   const compatMediaTemplateSourceRaw = readTrimmedString(raw.compatMediaTemplateSource)

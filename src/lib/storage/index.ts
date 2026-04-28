@@ -121,8 +121,18 @@ export async function downloadAndUploadVideo(
   maxRetries: number = UPLOAD_MAX_RETRIES,
   requestHeaders?: Record<string, string>,
 ): Promise<string> {
+  const fetchableVideoUrl = toFetchableUrl(videoUrl)
+  const safeVideoUrl = (() => {
+    try {
+      const parsed = new URL(fetchableVideoUrl)
+      return `${parsed.origin}${parsed.pathname}`
+    } catch {
+      return fetchableVideoUrl
+    }
+  })()
+
   return await withRetry(async () => {
-    const response = await fetch(toFetchableUrl(videoUrl), {
+    const response = await fetch(fetchableVideoUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; VideoDownloader/1.0)',
         ...(requestHeaders || {}),
@@ -130,7 +140,7 @@ export async function downloadAndUploadVideo(
     })
 
     if (!response.ok) {
-      throw new Error(`Failed to download video: ${response.status} ${response.statusText}`)
+      throw new Error(`Failed to download video: ${response.status} ${response.statusText} (url=${safeVideoUrl})`)
     }
 
     const buffer = Buffer.from(await response.arrayBuffer())

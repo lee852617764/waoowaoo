@@ -29,7 +29,8 @@ async function waitForMysql(maxAttempts = 180) {
         database: db.database,
         connectTimeout: 5_000,
       })
-      await conn.query('SELECT 1')
+      // Ping alone can succeed while the server is still finishing startup; this is closer to “ready for schema ops”.
+      await conn.query('SELECT COUNT(*) AS c FROM information_schema.tables WHERE table_schema = ?', [db.database])
       await conn.end()
       return
     } catch {
@@ -38,6 +39,25 @@ async function waitForMysql(maxAttempts = 180) {
   }
 
   throw new Error('MySQL test service did not become ready in time')
+}
+
+async function runPrismaDbPushWithRetry(maxAttempts = 12, delayMs = 2_000) {
+  let lastError: unknown
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      execSync('npx prisma db push --skip-generate --schema prisma/schema.prisma', {
+        cwd: process.cwd(),
+        stdio: 'inherit',
+      })
+      return
+    } catch (err) {
+      lastError = err
+      if (attempt < maxAttempts) {
+        await sleep(delayMs)
+      }
+    }
+  }
+  throw lastError
 }
 
 async function waitForRedis(maxAttempts = 60) {
@@ -80,18 +100,22 @@ export default async function globalSetup() {
     stdio: 'inherit',
   })
 
-  execSync('docker compose -f docker-compose.test.yml up -d --remove-orphans', {
-    cwd: process.cwd(),
-    stdio: 'inherit',
-  })
+  try {
+    execSync('docker compose -f docker-compose.test.yml up -d --remove-orphans --wait', {
+      cwd: process.cwd(),
+      stdio: 'inherit',
+    })
+  } catch {
+    execSync('docker compose -f docker-compose.test.yml up -d --remove-orphans', {
+      cwd: process.cwd(),
+      stdio: 'inherit',
+    })
+  }
 
   await waitForMysql()
   await waitForRedis()
 
-  execSync('npx prisma db push --skip-generate --schema prisma/schema.prisma', {
-    cwd: process.cwd(),
-    stdio: 'inherit',
-  })
+  await runPrismaDbPushWithRetry()
 
   return async () => {
     await runGlobalTeardown()
